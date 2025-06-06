@@ -1,6 +1,50 @@
 # everything_sdk3
 C wrapper for Everything IPC over named pipes
 
+Download
+--------
+
+https://www.voidtools.com/Everything-SDK3.zip
+
+
+
+The Everything 1.5 SDK is version 3 of the Everything SDK.
+
+Version 2 is for Everything 1.4.
+
+version 1 is for Everything 1.3.
+<br/>
+Previous versions are compatible with Everything 1.5.
+<br/>
+The Everything 1.5 SDK now uses named pipes.
+<br/>
+The name of the pipe is:
+<code>\\.\PIPE\Everything IPC</code>
+<br/>
+Pipe connections can be kept open if you wish to monitor result list changes.
+<br/>
+Everything hosts 8 pipe servers by default.
+
+pipe servers are recreated as soon as a client connects.
+
+Note: it's possible (but unlikely) for 8 clients to connect at the same time and the 9th client will fail before a new pipe server is created.
+<br/>
+To set the number of IPC pipe servers:
+
+*    In Everything 1.5, from the Tools menu, click Options.
+*    Click the Advanced tab on the left.
+*    To the right of Show settings containing, search for:
+*    menu
+*    Select: ipc_pipe_count
+*    Set the value to: 8<br/>
+     (where 8 is the number of IPC pipe servers)
+*    Click OK.
+<br/><br/><br/>
+
+
+Example Usage
+-------------
+
 <pre>
 #include "Everything3.h"
 
