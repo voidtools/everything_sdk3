@@ -44,7 +44,7 @@ void simple_example(void)
 				viewport_count = Everything3_GetResultListViewportCount(result_list);
 				
 				// loop through the results.
-				for(result_index=0;result_index<viewport_count;result_index++)
+				for(result_index=0;result_index&lt;viewport_count;result_index++)
 				{
 					wchar_t filename[MAX_PATH];
 
