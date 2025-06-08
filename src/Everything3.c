@@ -6366,6 +6366,7 @@ static EVERYTHING3_FIND_HANDLE *_everything3_find_first_file(EVERYTHING3_CLIENT 
 }
 
 // returns a snapshot of the filename search from a specific location.
+// returns NULL if no files found.
 // Call Everything3_FindClose to free the snapshot.
 // * and ? wildcards are supported.
 // only indexed values are returned.
@@ -6409,6 +6410,7 @@ EVERYTHING3_USERAPI EVERYTHING3_FIND_HANDLE *EVERYTHING3_API Everything3_FindFir
 }
 
 // returns a snapshot of the filename search from a specific location.
+// returns NULL if no files found.
 // Call Everything3_FindClose to free the snapshot.
 // * and ? wildcards are supported.
 // only indexed values are returned.
@@ -6614,53 +6616,60 @@ EVERYTHING3_USERAPI BOOL EVERYTHING3_API Everything3_FindNextFileW(EVERYTHING3_F
 	
 	ret = FALSE;
 	
-	if ((!find_handle->avail) && (!find_handle->chunk_cur))
+	if ((find_handle) && (pfd))
 	{
-		// EOF
-		SetLastError(EVERYTHING3_OK);
+		if ((!find_handle->avail) && (!find_handle->chunk_cur))
+		{
+			// EOF
+			SetLastError(EVERYTHING3_OK);
+		}
+		else
+		{
+			_everything3_win32_find_data_t fd;
+			SIZE_T filename_len;
+			_everything3_utf8_buf_t filename_cbuf;
+
+			_everything3_utf8_buf_init(&filename_cbuf);
+			
+			_everything3_find_handle_chunk_read_data(find_handle,&fd,sizeof(_everything3_win32_find_data_t));
+			
+			pfd->dwFileAttributes = fd.attributes;
+			pfd->ftCreationTime.dwLowDateTime = (DWORD)(fd.date_created & 0xffffffff);
+			pfd->ftCreationTime.dwHighDateTime = (DWORD)(fd.date_created >> 32);
+			pfd->ftLastAccessTime.dwLowDateTime = (DWORD)(fd.date_accessed & 0xffffffff);
+			pfd->ftLastAccessTime.dwHighDateTime = (DWORD)(fd.date_accessed >> 32);
+			pfd->ftLastWriteTime.dwLowDateTime = (DWORD)(fd.date_modified & 0xffffffff);
+			pfd->ftLastWriteTime.dwHighDateTime = (DWORD)(fd.date_modified >> 32);
+			pfd->nFileSizeHigh = (DWORD)(fd.size >> 32);
+			pfd->nFileSizeLow = (DWORD)(fd.size & 0xffffffff);
+			pfd->dwReserved0 = 0;
+			pfd->dwReserved1 = 0;
+			
+			filename_len = _everything3_find_handle_chunk_read_len_vlq(find_handle);
+
+			if (_everything3_utf8_buf_grow_length(&filename_cbuf,filename_len))
+			{
+				_everything3_find_handle_chunk_read_data(find_handle,filename_cbuf.buf,filename_len);
+				
+				_everything3_safe_wchar_string_copy_utf8_string_n(pfd->cFileName,MAX_PATH,filename_cbuf.buf,filename_cbuf.length_in_bytes);
+				pfd->cAlternateFileName[0] = 0;
+				
+				if (!find_handle->error_code)
+				{
+					ret = TRUE;
+				}
+				else
+				{
+					SetLastError(find_handle->error_code);
+				}
+			}
+			
+			_everything3_utf8_buf_kill(&filename_cbuf);
+		}
 	}
 	else
 	{
-		_everything3_win32_find_data_t fd;
-		SIZE_T filename_len;
-		_everything3_utf8_buf_t filename_cbuf;
-
-		_everything3_utf8_buf_init(&filename_cbuf);
-		
-		_everything3_find_handle_chunk_read_data(find_handle,&fd,sizeof(_everything3_win32_find_data_t));
-		
-		pfd->dwFileAttributes = fd.attributes;
-		pfd->ftCreationTime.dwLowDateTime = (DWORD)(fd.date_created & 0xffffffff);
-		pfd->ftCreationTime.dwHighDateTime = (DWORD)(fd.date_created >> 32);
-		pfd->ftLastAccessTime.dwLowDateTime = (DWORD)(fd.date_accessed & 0xffffffff);
-		pfd->ftLastAccessTime.dwHighDateTime = (DWORD)(fd.date_accessed >> 32);
-		pfd->ftLastWriteTime.dwLowDateTime = (DWORD)(fd.date_modified & 0xffffffff);
-		pfd->ftLastWriteTime.dwHighDateTime = (DWORD)(fd.date_modified >> 32);
-		pfd->nFileSizeHigh = (DWORD)(fd.size >> 32);
-		pfd->nFileSizeLow = (DWORD)(fd.size & 0xffffffff);
-		pfd->dwReserved0 = 0;
-		pfd->dwReserved1 = 0;
-		
-		filename_len = _everything3_find_handle_chunk_read_len_vlq(find_handle);
-
-		if (_everything3_utf8_buf_grow_length(&filename_cbuf,filename_len))
-		{
-			_everything3_find_handle_chunk_read_data(find_handle,filename_cbuf.buf,filename_len);
-			
-			_everything3_safe_wchar_string_copy_utf8_string_n(pfd->cFileName,MAX_PATH,filename_cbuf.buf,filename_cbuf.length_in_bytes);
-			pfd->cAlternateFileName[0] = 0;
-			
-			if (!find_handle->error_code)
-			{
-				ret = TRUE;
-			}
-			else
-			{
-				SetLastError(find_handle->error_code);
-			}
-		}
-		
-		_everything3_utf8_buf_kill(&filename_cbuf);
+		SetLastError(EVERYTHING3_ERROR_INVALID_PARAMETER);
 	}
 	
 	return ret;
@@ -6673,53 +6682,60 @@ EVERYTHING3_USERAPI BOOL EVERYTHING3_API Everything3_FindNextFileA(EVERYTHING3_F
 	
 	ret = FALSE;
 	
-	if ((!find_handle->avail) && (!find_handle->chunk_cur))
+	if ((find_handle) && (pfd))
 	{
-		// EOF
-		SetLastError(EVERYTHING3_OK);
+		if ((!find_handle->avail) && (!find_handle->chunk_cur))
+		{
+			// EOF
+			SetLastError(EVERYTHING3_OK);
+		}
+		else
+		{
+			_everything3_win32_find_data_t fd;
+			SIZE_T filename_len;
+			_everything3_utf8_buf_t filename_cbuf;
+
+			_everything3_utf8_buf_init(&filename_cbuf);
+			
+			_everything3_find_handle_chunk_read_data(find_handle,&fd,sizeof(_everything3_win32_find_data_t));
+			
+			pfd->dwFileAttributes = fd.attributes;
+			pfd->ftCreationTime.dwLowDateTime = (DWORD)(fd.date_created & 0xffffffff);
+			pfd->ftCreationTime.dwHighDateTime = (DWORD)(fd.date_created >> 32);
+			pfd->ftLastAccessTime.dwLowDateTime = (DWORD)(fd.date_accessed & 0xffffffff);
+			pfd->ftLastAccessTime.dwHighDateTime = (DWORD)(fd.date_accessed >> 32);
+			pfd->ftLastWriteTime.dwLowDateTime = (DWORD)(fd.date_modified & 0xffffffff);
+			pfd->ftLastWriteTime.dwHighDateTime = (DWORD)(fd.date_modified >> 32);
+			pfd->nFileSizeHigh = (DWORD)(fd.size >> 32);
+			pfd->nFileSizeLow = (DWORD)(fd.size & 0xffffffff);
+			pfd->dwReserved0 = 0;
+			pfd->dwReserved1 = 0;
+			
+			filename_len = _everything3_find_handle_chunk_read_len_vlq(find_handle);
+
+			if (_everything3_utf8_buf_grow_length(&filename_cbuf,filename_len))
+			{
+				_everything3_find_handle_chunk_read_data(find_handle,filename_cbuf.buf,filename_len);
+				
+				_everything3_safe_ansi_string_copy_utf8_string_n(pfd->cFileName,MAX_PATH,filename_cbuf.buf,filename_cbuf.length_in_bytes);
+				pfd->cAlternateFileName[0] = 0;
+				
+				if (!find_handle->error_code)
+				{
+					ret = TRUE;
+				}
+				else
+				{
+					SetLastError(find_handle->error_code);
+				}
+			}
+			
+			_everything3_utf8_buf_kill(&filename_cbuf);
+		}
 	}
 	else
 	{
-		_everything3_win32_find_data_t fd;
-		SIZE_T filename_len;
-		_everything3_utf8_buf_t filename_cbuf;
-
-		_everything3_utf8_buf_init(&filename_cbuf);
-		
-		_everything3_find_handle_chunk_read_data(find_handle,&fd,sizeof(_everything3_win32_find_data_t));
-		
-		pfd->dwFileAttributes = fd.attributes;
-		pfd->ftCreationTime.dwLowDateTime = (DWORD)(fd.date_created & 0xffffffff);
-		pfd->ftCreationTime.dwHighDateTime = (DWORD)(fd.date_created >> 32);
-		pfd->ftLastAccessTime.dwLowDateTime = (DWORD)(fd.date_accessed & 0xffffffff);
-		pfd->ftLastAccessTime.dwHighDateTime = (DWORD)(fd.date_accessed >> 32);
-		pfd->ftLastWriteTime.dwLowDateTime = (DWORD)(fd.date_modified & 0xffffffff);
-		pfd->ftLastWriteTime.dwHighDateTime = (DWORD)(fd.date_modified >> 32);
-		pfd->nFileSizeHigh = (DWORD)(fd.size >> 32);
-		pfd->nFileSizeLow = (DWORD)(fd.size & 0xffffffff);
-		pfd->dwReserved0 = 0;
-		pfd->dwReserved1 = 0;
-		
-		filename_len = _everything3_find_handle_chunk_read_len_vlq(find_handle);
-
-		if (_everything3_utf8_buf_grow_length(&filename_cbuf,filename_len))
-		{
-			_everything3_find_handle_chunk_read_data(find_handle,filename_cbuf.buf,filename_len);
-			
-			_everything3_safe_ansi_string_copy_utf8_string_n(pfd->cFileName,MAX_PATH,filename_cbuf.buf,filename_cbuf.length_in_bytes);
-			pfd->cAlternateFileName[0] = 0;
-			
-			if (!find_handle->error_code)
-			{
-				ret = TRUE;
-			}
-			else
-			{
-				SetLastError(find_handle->error_code);
-			}
-		}
-		
-		_everything3_utf8_buf_kill(&filename_cbuf);
+		SetLastError(EVERYTHING3_ERROR_INVALID_PARAMETER);
 	}
 	
 	return ret;
