@@ -4736,13 +4736,10 @@ static BYTE *_everything3_copy_len_vlq(BYTE *buf,SIZE_T value)
 	{
 		if (buf)
 		{
-			*d++ = (BYTE)(value >> 8);
-			*d++ = (BYTE)(value);
+			*(WORD *)d = (WORD)value;
 		}
-		else
-		{
-			d += 2;
-		}
+
+		d += 2;
 		
 		return d;
 	}
@@ -4751,27 +4748,19 @@ static BYTE *_everything3_copy_len_vlq(BYTE *buf,SIZE_T value)
 
 	if (buf)
 	{
-		*d++ = 0xff;
-		*d++ = 0xff;
+		*(WORD *)d = 0xffff;
 	}
-	else
-	{
-		d += 2;
-	}
+
+	d += 2;
 	
 	if (value < 0xffffffff)
 	{
 		if (buf)
 		{
-			*d++ = (BYTE)(value >> 24);
-			*d++ = (BYTE)(value >> 16);
-			*d++ = (BYTE)(value >> 8);
-			*d++ = (BYTE)(value);
+			*(DWORD *)d = (DWORD)value;
 		}
-		else
-		{
-			d += 4;
-		}
+
+		d += 4;
 		
 		return d;
 	}
@@ -4780,53 +4769,30 @@ static BYTE *_everything3_copy_len_vlq(BYTE *buf,SIZE_T value)
 
 	if (buf)
 	{
-		*d++ = 0xff;
-		*d++ = 0xff;
-		*d++ = 0xff;
-		*d++ = 0xff;
+		*(DWORD *)d = 0xffffffff;
 	}
-	else
-	{
-		d += 4;
-	}
+
+	d += 4;
 	
 	// value cannot be larger than or equal to 0xffffffffffffffff
 #if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
 
 	if (buf)
 	{
-		*d++ = (BYTE)(value >> 56);
-		*d++ = (BYTE)(value >> 48);
-		*d++ = (BYTE)(value >> 40);
-		*d++ = (BYTE)(value >> 32);
-		*d++ = (BYTE)(value >> 24);
-		*d++ = (BYTE)(value >> 16);
-		*d++ = (BYTE)(value >> 8);
-		*d++ = (BYTE)(value);
+		*(EVERYTHING3_UINT64 *)d = (EVERYTHING3_UINT64)value;
 	}
-	else
-	{
-		d += 8;
-	}
+
+	d += 8;
 	
 
 #elif SIZE_MAX == 0xFFFFFFFF
 
 	if (buf)
 	{
-		*d++ = 0x00;
-		*d++ = 0x00;
-		*d++ = 0x00;
-		*d++ = 0x00;
-		*d++ = 0xff;
-		*d++ = 0xff;
-		*d++ = 0xff;
-		*d++ = 0xff;
+		*(EVERYTHING3_UINT64 *)d = (EVERYTHING3_UINT64)value;
 	}
-	else
-	{
-		d += 8;
-	}
+
+	d += 8;
 	
 #else
 	#error unknown SIZE_MAX
