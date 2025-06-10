@@ -34,7 +34,6 @@
 //
 //
 // TODO:
-// validate all parameters.
 // PropVariant support.
 // EnumResults() for faster ES results. -don't use a result_list 
 // Convert properties, eg: value type is PROPERTY_VALUE_TYPE_BYTE, which we should be able to get from GetPropertyDWORD() -or should we be strict because casting may lose data
