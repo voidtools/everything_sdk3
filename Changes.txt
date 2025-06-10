@@ -1,4 +1,8 @@
+Tuesday, 10 June 2025: Version 1.0.0.3
+	fixed an issue with encoding vlqs.
+
 Tuesday, 10 June 2025: Version 1.0.0.2
 	added new code signing certificate: voidtools PTY LTD
 	improved handling of invalid parameters.
+	improved handling of invalid pipe names.
 	fixed an issue with calculating the size of ANSI buffers.
