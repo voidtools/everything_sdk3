@@ -5,7 +5,7 @@ Download
 --------
 
 https://github.com/voidtools/everything_sdk3/releases<br/>
-https://www.voidtools.com/Everything-SDK3.zip
+https://www.voidtools.com/forum/viewtopic.php?t=15853
 <br/><br/><br/>
 
 
