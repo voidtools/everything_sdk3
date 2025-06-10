@@ -4,6 +4,7 @@ C wrapper for Everything IPC over named pipes
 Download
 --------
 
+https://github.com/voidtools/everything_sdk3/releases
 https://www.voidtools.com/Everything-SDK3.zip
 <br/><br/><br/>
 
