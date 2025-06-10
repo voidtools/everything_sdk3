@@ -1,4 +1,4 @@
-Tuesday, 10 June 2025: Version 1.0.0.4
+Tuesday, 10 June 2025: Version 3.0.0.4
 	added version information.
 
 Tuesday, 10 June 2025: Version 1.0.0.3
