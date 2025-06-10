@@ -1,0 +1,4 @@
+Tuesday, 10 June 2025: Version 1.0.0.2
+	added new code signing certificate: voidtools PTY LTD
+	improved handling of invalid parameters.
+	fixed an issue with calculating the size of ANSI buffers.
