@@ -10,7 +10,7 @@ https://www.voidtools.com/forum/viewtopic.php?t=15853
 
 
 
-The Everything 1.5 SDK is version 3 of the Everything SDK.
+Version 3 is for Everything 1.5.
 
 Version 2 is for Everything 1.4.
 
