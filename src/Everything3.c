@@ -529,7 +529,7 @@ typedef struct _everything3_property_variant_array_s
 }_everything3_property_variant_array_t;
 
 // EVERYTHING3_PROPERTY_VALUE_TYPE_PROPVARIANT value
-typedef struct _everything3_property_variant_value_s
+typedef union _everything3_property_variant_value_s
 {
 	BYTE byte_value;
 	WORD word_value;
