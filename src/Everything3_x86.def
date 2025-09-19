@@ -49,6 +49,9 @@ EXPORTS
 	Everything3_GetPropertyType
 	Everything3_IsPropertyIndexed
 	Everything3_IsPropertyFastSort
+	Everything3_IsPropertyRightAligned
+	Everything3_IsPropertySortDescending
+	Everything3_GetPropertyDefaultWidth
 	Everything3_CreateSearchState
 	Everything3_DestroySearchState
 	Everything3_SetSearchMatchCase
@@ -136,6 +139,7 @@ EXPORTS
 	Everything3_GetResultPropertySIZE_T
 	Everything3_GetResultPropertyINT32
 	Everything3_GetResultPropertyBlob
+	Everything3_GetResultPropertyPropVariant
 	Everything3_GetResultNameUTF8
 	Everything3_GetResultNameW
 	Everything3_GetResultNameA
@@ -162,3 +166,7 @@ EXPORTS
 	Everything3_GetResultFilelistFilenameUTF8
 	Everything3_GetResultFilelistFilenameW
 	Everything3_GetResultFilelistFilenameA
+	Everything3_GetJournalInfo
+	Everything3_ReadJournalUTF8
+	Everything3_ReadJournalW
+	Everything3_ReadJournalA
