@@ -301,7 +301,7 @@
     <Link>
       <AdditionalOptions>/safeseh:no %(AdditionalOptions)</AdditionalOptions>
       <OutputFile>dll\Everything3_ARM.dll</OutputFile>
-      <ModuleDefinitionFile>..\src\Everything3_x86.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>..\src\Everything3_ARM.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateMapFile>true</GenerateMapFile>
       <OptimizeReferences>true</OptimizeReferences>
@@ -367,7 +367,7 @@
     </ClCompile>
     <Link>
       <OutputFile>dll\Everything3_ARM64.dll</OutputFile>
-      <ModuleDefinitionFile>..\src\Everything3_x64.def</ModuleDefinitionFile>
+      <ModuleDefinitionFile>..\src\Everything3_ARM64.def</ModuleDefinitionFile>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateMapFile>true</GenerateMapFile>
       <OptimizeReferences>true</OptimizeReferences>
@@ -570,6 +570,8 @@
     <ClCompile Include="..\src\Everything3.c" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\src\Everything3_ARM.def" />
+    <None Include="..\src\Everything3_ARM64.def" />
     <None Include="..\src\Everything3_x64.def" />
     <None Include="..\src\Everything3_x86.def" />
   </ItemGroup>
