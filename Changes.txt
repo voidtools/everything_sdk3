@@ -1,3 +1,7 @@
+Friday, 19 September 2025: Version 3.0.0.5
+	added PropVariant support -requires Everything 1.5.0.1397a or later.
+	added Index Journal API -requires Everything 1.5.0.1397a or later.
+
 Tuesday, 10 June 2025: Version 3.0.0.4
 	added version information.
 
