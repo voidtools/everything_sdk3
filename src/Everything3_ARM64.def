@@ -13,7 +13,7 @@ EXPORTS
 	Everything3_GetMinorVersion
 	Everything3_GetRevision
 	Everything3_GetBuildNumber
-	Everything_GetTargetMachine
+	Everything3_GetTargetMachine
 	Everything3_IsDBLoaded
 	Everything3_GetRunCountFromFilenameUTF8
 	Everything3_GetRunCountFromFilenameW
@@ -103,6 +103,7 @@ EXPORTS
 	Everything3_GetSearchPropertyRequestFormat
 	Everything3_GetSearchViewportOffset
 	Everything3_GetSearchViewportCount
+	Everything3_SetSearchSort
 	Everything3_Search
 	Everything3_DestroyResultList
 	Everything3_IsResultListChange
@@ -118,7 +119,6 @@ EXPORTS
 	Everything3_GetResultListPropertyRequestCount
 	Everything3_GetResultListPropertyRequestPropertyId
 	Everything3_GetResultListPropertyRequestValueType
-	Everything3_GetResultListPropertyRequestOffset
 	Everything3_IsFolderResult
 	Everything3_IsRootResult
 	Everything3_GetResultPropertyTextUTF8
