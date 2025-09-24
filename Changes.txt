@@ -1,3 +1,17 @@
+Wednesday, 24 September 2025: Version 3.0.0.7
+	renamed Everything_GetTargetMachine to Everything3_GetTargetMachine
+	Everything3_GetResultListPropertyRequestValueType now returns EVERYTHING3_PROPERTY_VARIANT_TYPE_NULL on error. (instead of EVERYTHING3_INVALID_PROPERTY_ID)
+	Everything3_GetResultListFolderCount, Everything3_GetResultListFileCount, Everything3_GetResultListCount now sets the last error to EVERYTHING3_OK if the result count was 0.
+	Everything3_GetResultListTotalSize now returns EVERYTHING_UINT64_MAX on error. (was 0)
+	removed Everything3_GetResultListPropertyRequestOffset.
+	Everything3_ClearSearchSorts now returns true if successful.
+	Everything3_ClearSearchPropertyRequests now returns true if successful.
+	fixed memory corruption when reallocating sort array.
+	fixed memory corruption when reallocating property request array.
+	fixed a crash with overlapped reads.
+	fixed a crash with overlapped writes.
+	fixed an issue with requesting date modified with _everything3_read_journal.
+	
 Friday, 19 September 2025: Version 3.0.0.6
 	changed _everything3_property_variant_value_t to a union.
 	
