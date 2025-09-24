@@ -46,6 +46,14 @@ To set the number of IPC pipe servers:
 <br/><br/><br/>
 
 
+
+API
+---
+
+https://www.voidtools.com/forum/viewtopic.php?t=15853#api
+
+
+
 Example Usage
 -------------
 
