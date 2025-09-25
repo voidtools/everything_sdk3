@@ -68,6 +68,9 @@
 // *fixed a crash with overlapped reads.
 // *fixed a crash with overlapped writes.
 // *fixed an issue with requesting date modified with _everything3_read_journal.
+// 3.0.0.8
+// *fixed a crash with overlapped reads.
+// *fixed a crash with overlapped writes.
 
 // dll export
 #ifdef EVERYTHING3_LIB
@@ -607,6 +610,7 @@ static BOOL _everything3_wchar_buf_get_pipe_name(_everything3_wchar_buf_t *wcbuf
 static BOOL _everything3_wchar_buf_copy_ansi_string(_everything3_wchar_buf_t *out_wcbuf,const EVERYTHING3_CHAR *s);
 static BOOL _everything3_wchar_buf_copy_utf8_string_n(_everything3_wchar_buf_t *out_wcbuf,const EVERYTHING3_UTF8 *s,SIZE_T slen);
 static HANDLE _everything3_create_event(void);
+static BOOL _everything3_write_pipe(_everything3_client_t *client,const void *in_data,DWORD in_size);
 static BOOL _everything3_send(_everything3_client_t *client,DWORD code,const void *in_data,SIZE_T in_size);
 static BOOL _everything3_recv_header(_everything3_client_t *client,_everything3_message_t *recv_header);
 static BOOL _everything3_recv_data(_everything3_client_t *client,void *out_buf,SIZE_T buf_size);
@@ -1399,155 +1403,94 @@ static BOOL _everything3_wchar_buf_grow_length(_everything3_wchar_buf_t *wcbuf,S
 	return FALSE;
 }
 
-// send some data to the IPC pipe.
-// returns TRUE if successful.
-// returns FALSE on error. Call GetLastError() for more information.
-static BOOL _everything3_send(_everything3_client_t *client,DWORD code,const void *in_data,SIZE_T in_size)
+// writes data to the pipe
+// blocks until the data is sent.
+// cancels the write if the shutdown event is triggered.
+// doesn't return until the OVERLAPPED IO finishes.
+// Returns TRUE if the write is successful.
+// Returns FALSE on error. Sets the last error on failure.
+static BOOL _everything3_write_pipe(_everything3_client_t *client,const void *in_data,DWORD in_size)
 {
-	// make sure the in_size is sane.
-	if (in_size <= EVERYTHING3_DWORD_MAX)
+	const BYTE *send_p;
+	DWORD send_run;
+	
+	send_p = (const BYTE *)in_data;
+	send_run = in_size;
+
+	while(send_run)
 	{
-		_everything3_message_t send_message;
 		DWORD numwritten;
-		BYTE *send_p;
-		DWORD send_run;
 		
-		send_message.code = code;
-		send_message.size = (DWORD)in_size;
-		
-		send_p = (BYTE *)&send_message;
-		send_run = sizeof(_everything3_message_t);
+		_everything3_zero_memory(&client->send_overlapped,sizeof(OVERLAPPED));
+		client->send_overlapped.hEvent = client->send_event;
+		ResetEvent(client->send_overlapped.hEvent);
 
-		while(send_run)
+		if (WriteFile(client->pipe_handle,send_p,send_run,&numwritten,&client->send_overlapped))
 		{
-			_everything3_zero_memory(&client->send_overlapped,sizeof(OVERLAPPED));
-			client->send_overlapped.hEvent = client->send_event;
-			ResetEvent(client->send_overlapped.hEvent);
+			send_p += numwritten;
+			send_run -= numwritten;
 			
-			if (WriteFile(client->pipe_handle,send_p,send_run,&numwritten,&client->send_overlapped))
-			{
-				if (numwritten)
-				{
-					send_p += numwritten;
-					send_run -= numwritten;
-
-					continue;
-				}
-				else
-				{
-					// eof
-					SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
-
-					return FALSE;
-				}
-			}
-			else
-			{
-				DWORD last_error;
-				
-				last_error = GetLastError();
-				
-				if ((last_error == ERROR_IO_INCOMPLETE) || (last_error == ERROR_IO_PENDING))
-				{
-					HANDLE wait_handles[2];
-					
-					wait_handles[0] = client->shutdown_event;
-					wait_handles[1] = client->send_event;
-					
-					if (WaitForMultipleObjects(2,wait_handles,FALSE,INFINITE) == WAIT_OBJECT_0)
-					{
-						SetLastError(EVERYTHING3_ERROR_SHUTDOWN);
-						
-						return FALSE;
-					}
-					
-					// still writing..
-					if (GetOverlappedResult(client->pipe_handle,&client->send_overlapped,&numwritten,FALSE))
-					{
-						if (numwritten)
-						{
-							send_p += numwritten;
-							send_run -= numwritten;
-
-							continue;
-						}
-						else
-						{
-							// eof
-							SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
-
-							return FALSE;
-						}
-					}
-					else
-					{
-						_everything3_debug_printf("send GetOverlappedResult error: %p: %u\n",client->pipe_handle,GetLastError());
-
-						SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
-						
-						return FALSE;
-					}
-				}
-				else
-				{
-					_everything3_debug_printf("ipc pipe overlapped send error %p: %u\n",client->pipe_handle,last_error);
-					
-					SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
-
-					return FALSE;
-				}
-			}
+			// continue..
+			continue;
 		}
-		
-		send_p = (BYTE *)in_data;
-		send_run = (DWORD)in_size;
-
-		while(send_run)
+		else
 		{
-			_everything3_zero_memory(&client->send_overlapped,sizeof(OVERLAPPED));
-			client->send_overlapped.hEvent = client->send_event;
-			ResetEvent(client->send_overlapped.hEvent);
-
-			if (WriteFile(client->pipe_handle,send_p,send_run,&numwritten,&client->send_overlapped))
-			{
-				send_p += numwritten;
-				send_run -= numwritten;
+			DWORD last_error;
+			
+			last_error = GetLastError();
+			
+			if ((last_error == ERROR_IO_INCOMPLETE) || (last_error == ERROR_IO_PENDING))
+			{	
+				HANDLE wait_handles[2];
+				DWORD wait_ret;
 				
-				// continue..
-				continue;
-			}
-			else
-			{
-				DWORD last_error;
+				wait_handles[0] = client->shutdown_event;
+				wait_handles[1] = client->send_event;
 				
-				last_error = GetLastError();
+				wait_ret = WaitForMultipleObjects(2,wait_handles,FALSE,INFINITE);
 				
-				if ((last_error == ERROR_IO_INCOMPLETE) || (last_error == ERROR_IO_PENDING))
-				{	
-					HANDLE wait_handles[2];
+				if (wait_ret == WAIT_OBJECT_0)
+				{
+					SetLastError(EVERYTHING3_ERROR_SHUTDOWN);
 					
-					wait_handles[0] = client->shutdown_event;
-					wait_handles[1] = client->send_event;
+					// cancel pending IO
+					CancelIo(client->pipe_handle);
 					
-					if (WaitForMultipleObjects(2,wait_handles,FALSE,INFINITE) == WAIT_OBJECT_0)
-					{
-						SetLastError(EVERYTHING3_ERROR_SHUTDOWN);
-						
-						return FALSE;
-					}
+					// wait for pending IO to cancel.
+					GetOverlappedResult(client->pipe_handle,&client->send_overlapped,&numwritten,TRUE);
 					
-					// still writing..
-					if (GetOverlappedResult(client->pipe_handle,&client->send_overlapped,&numwritten,FALSE))
+					return FALSE;
+				}
+				
+				if (wait_ret != WAIT_OBJECT_0+1)
+				{
+					_everything3_debug_printf("send WaitForMultipleObjects error: %p: %u\n",client->pipe_handle,GetLastError());
+					
+					SetLastError(EVERYTHING3_ERROR_SERVER);
+					
+					// cancel pending IO
+					CancelIo(client->pipe_handle);
+					
+					// wait for pending IO to cancel.
+					GetOverlappedResult(client->pipe_handle,&client->send_overlapped,&numwritten,TRUE);
+					
+					return FALSE;
+				}
+				
+				// ASSUME client->send_event is set.
+				// wait for overlapped result.
+				if (GetOverlappedResult(client->pipe_handle,&client->send_overlapped,&numwritten,TRUE))
+				{
+					if (numwritten)
 					{
 						send_p += numwritten;
 						send_run -= numwritten;
-				
+
 						continue;
 					}
 					else
 					{
-						_everything3_debug_printf("send GetOverlappedResult error: %p: %u\n",client->pipe_handle,GetLastError());
-
+						// EOF
 						SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
 						
 						return FALSE;
@@ -1555,23 +1498,61 @@ static BOOL _everything3_send(_everything3_client_t *client,DWORD code,const voi
 				}
 				else
 				{
-					_everything3_debug_printf("ipc pipe overlapped send error %p: %u\n",client->pipe_handle,last_error);
-					
-					SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
+					// cannot be pending as we wait above.
+					_everything3_debug_printf("send GetOverlappedResult error: %p: %u\n",client->pipe_handle,GetLastError());
 
+					SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
+					
 					return FALSE;
 				}
 			}
+			else
+			{
+				_everything3_debug_printf("ipc pipe overlapped send error %p: %u\n",client->pipe_handle,last_error);
+				
+				SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
+
+				return FALSE;
+			}
 		}
+	}
+	
+	return TRUE;	
+}
+
+// send some data to the IPC pipe.
+// returns TRUE if successful.
+// returns FALSE on error. Call GetLastError() for more information.
+// Blocks until the data it sent.
+// Can be cancelled with Everything3_ShutdownClient.
+static BOOL _everything3_send(_everything3_client_t *client,DWORD code,const void *in_data,SIZE_T in_size)
+{
+	BOOL ret;
+	
+	ret = FALSE;
+	
+	// make sure the in_size is sane.
+	if (in_size <= EVERYTHING3_DWORD_MAX)
+	{
+		_everything3_message_t send_message;
 		
-		return TRUE;
+		send_message.code = code;
+		send_message.size = (DWORD)in_size;
+		
+		if (_everything3_write_pipe(client,&send_message,sizeof(_everything3_message_t)))
+		{
+			if (_everything3_write_pipe(client,in_data,(DWORD)in_size))
+			{
+				ret = TRUE;
+			}
+		}
 	}
 	else
 	{
-		SetLastError(EVERYTHING3_ERROR_OUT_OF_MEMORY);
-
-		return FALSE;
+		SetLastError(EVERYTHING3_ERROR_INVALID_PARAMETER);
 	}
+	
+	return ret;
 }
 
 // Receive the message header from the IPC pipe.
@@ -1630,6 +1611,9 @@ static BOOL _everything3_recv_header(_everything3_client_t *client,_everything3_
 }
 
 // Receive some data from the IPC pipe.
+// blocks until the data is recv.
+// cancels the read if the shutdown event is triggered.
+// doesn't return until the OVERLAPPED IO finishes.
 // returns TRUE if successful.
 // returns FALSE on error. Call GetLastError() for more information.
 static BOOL _everything3_recv_data(_everything3_client_t *client,void *out_buf,SIZE_T buf_size)
@@ -1694,19 +1678,44 @@ static BOOL _everything3_recv_data(_everything3_client_t *client,void *out_buf,S
 			if ((last_error == ERROR_IO_INCOMPLETE) || (last_error == ERROR_IO_PENDING))
 			{
 				HANDLE wait_handles[2];
+				DWORD wait_ret;
 				
 				wait_handles[0] = client->shutdown_event;
 				wait_handles[1] = client->recv_event;
 				
-				if (WaitForMultipleObjects(2,wait_handles,FALSE,INFINITE) == WAIT_OBJECT_0)
+				wait_ret = WaitForMultipleObjects(2,wait_handles,FALSE,INFINITE);
+				
+				if (wait_ret == WAIT_OBJECT_0)
 				{
 					SetLastError(EVERYTHING3_ERROR_SHUTDOWN);
+					
+					// cancel pending IO
+					CancelIo(client->pipe_handle);
+					
+					// wait for pending IO to cancel.
+					GetOverlappedResult(client->pipe_handle,&client->recv_overlapped,&numread,TRUE);
 					
 					break;
 				}
 				
-				// still reading..
-				if (GetOverlappedResult(client->pipe_handle,&client->recv_overlapped,&numread,FALSE))
+				if (wait_ret != WAIT_OBJECT_0+1)
+				{
+					_everything3_debug_printf("recv WaitForMultipleObjects error: %p: %u\n",client->pipe_handle,GetLastError());
+					
+					SetLastError(EVERYTHING3_ERROR_SHUTDOWN);
+					
+					// cancel pending IO
+					CancelIo(client->pipe_handle);
+					
+					// wait for pending IO to cancel.
+					GetOverlappedResult(client->pipe_handle,&client->recv_overlapped,&numread,TRUE);
+					
+					break;
+				}
+				
+				// ASSUME client->recv_event is set.
+				// wait for overlapped result.
+				if (GetOverlappedResult(client->pipe_handle,&client->recv_overlapped,&numread,TRUE))
 				{
 					if (numread)
 					{
@@ -1725,6 +1734,7 @@ static BOOL _everything3_recv_data(_everything3_client_t *client,void *out_buf,S
 				}
 				else
 				{
+					// cannot be pending as we wait above.
 					_everything3_debug_printf("recv GetOverlappedResult error: %p: %u\n",client->pipe_handle,GetLastError());
 
 					SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
