@@ -1,3 +1,7 @@
+Thursday, 25 September 2025: Version 3.0.0.8
+	fixed a crash with overlapped reads.
+	fixed a crash with overlapped writes.
+
 Wednesday, 24 September 2025: Version 3.0.0.7
 	renamed Everything_GetTargetMachine to Everything3_GetTargetMachine
 	Everything3_GetResultListPropertyRequestValueType now returns EVERYTHING3_PROPERTY_VARIANT_TYPE_NULL on error. (instead of EVERYTHING3_INVALID_PROPERTY_ID)
