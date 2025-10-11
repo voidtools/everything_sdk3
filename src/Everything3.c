@@ -867,8 +867,8 @@ static HANDLE _everything3_create_event(void)
 // Connect to Everything
 // connects to the named pipe "\\\\.\\PIPE\\Everything IPC (instance-name)"
 // connects to the named pipe "\\\\.\\PIPE\\Everything IPC" when no instance name is supplied.
-// Everything will try to host a few pipe servers so we should be able to connect immediately.
-// keep polling for a connection if this fails with EVERYTHING3_ERROR_IPC_PIPE_NOT_FOUND.
+// Everything will recreate pipe servers immediately.
+// This function will keep polling for a connection if the pipe server is busy.
 // instance_name can BE NULL.
 // a NULL instance_name or an empty instance_name will connect to the unnamed instance.
 // The Everything 1.5 alpha will use an "1.5a" instance.
@@ -883,6 +883,8 @@ EVERYTHING3_USERAPI _everything3_client_t *EVERYTHING3_API Everything3_ConnectW(
 	if (_everything3_wchar_buf_get_pipe_name(&pipe_name_wcbuf,instance_name))
 	{
 		HANDLE pipe_handle;
+
+retry:
 		
 		pipe_handle = CreateFileW(pipe_name_wcbuf.buf,GENERIC_READ|GENERIC_WRITE,0,0,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,0);
 		if (pipe_handle != INVALID_HANDLE_VALUE)
@@ -942,11 +944,24 @@ EVERYTHING3_USERAPI _everything3_client_t *EVERYTHING3_API Everything3_ConnectW(
 			{
 				CloseHandle(pipe_handle);
 			}
-		
 		}
 		else
 		{
-			_everything3_debug_printf("CreateFile failed %u\n",GetLastError());
+			DWORD last_error;
+			
+			last_error = GetLastError();
+			
+			_everything3_debug_printf("CreateFile %S failed %u\n",pipe_name_wcbuf.buf,last_error);
+			
+			if (last_error == ERROR_PIPE_BUSY)
+			{
+				Sleep(10);
+				
+				// Everything will create a new pipe server immediately.
+				// this will not take very long.
+				// retry
+				goto retry;
+			}
 		
 			SetLastError(EVERYTHING3_ERROR_IPC_PIPE_NOT_FOUND);
 		}
@@ -1427,11 +1442,21 @@ static BOOL _everything3_write_pipe(_everything3_client_t *client,const void *in
 
 		if (WriteFile(client->pipe_handle,send_p,send_run,&numwritten,&client->send_overlapped))
 		{
-			send_p += numwritten;
-			send_run -= numwritten;
-			
-			// continue..
-			continue;
+			if (numwritten)
+			{
+				send_p += numwritten;
+				send_run -= numwritten;
+
+				// continue..
+				continue;
+			}
+			else
+			{
+				// EOF
+				SetLastError(EVERYTHING3_ERROR_DISCONNECTED);
+				
+				return FALSE;
+			}
 		}
 		else
 		{

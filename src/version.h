@@ -2,7 +2,7 @@
 #define VERSION_MAJOR 			3
 #define VERSION_MINOR 			0
 #define VERSION_REVISION		0
-#define VERSION_BUILD			8
+#define VERSION_BUILD			9
 
 #define _VERSION_TEXT_STR2(x)	#x
 #define _VERSION_TEXT_STR(x)	_VERSION_TEXT_STR2(x)
