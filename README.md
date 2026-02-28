@@ -27,23 +27,6 @@ Everything 1.5 alpha runs in a <code>1.5a</code> instance.<br/>
 <br/><br/>
 Pipe connections can be kept open if you wish to monitor result list changes.
 <br/><br/>
-Everything hosts 8 pipe servers by default.
-
-pipe servers are recreated as soon as a client connects.
-
-Note: it's possible (but unlikely) for 8 clients to connect at the same time and the 9th client will fail before a new pipe server is created.
-<br/><br/>
-To set the number of IPC pipe servers:
-
-*    In Everything 1.5, from the Tools menu, click Options.
-*    Click the Advanced tab on the left.
-*    To the right of Show settings containing, search for:<br/>
-     <code>menu</code>
-*    Select: ipc_pipe_count
-*    Set the value to: 8<br/>
-     (where 8 is the number of IPC pipe servers)
-*    Click OK.
-<br/><br/><br/>
 
 
 
