@@ -52,7 +52,8 @@ void simple_example(void)
 	client = Everything3_ConnectW(NULL);
 	if (!client)
 	{
-		// connect to Everything.. Try the 1.5a instance.
+		// failed to connect.
+		// try to connect to Everything with the 1.5a instance.
 		client = Everything3_ConnectW(L"1.5a");
 	}
 
