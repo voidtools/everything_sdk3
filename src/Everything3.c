@@ -38,6 +38,7 @@
 // match_pinyin search flag. (client should use global pinyin modifier)
 // api to get a property from a filename?
 // a flag to load properties in the background and post result changes.
+// BOOL Everything3_IsResultPropertyValueValid(EVERYTHING3_RESULT_LIST *result_list,SIZE_T result_index,DWORD property_id) -user does't want to check for UINT32_MAX/UINT64_MAX etc..
 //
 //
 //
@@ -71,6 +72,14 @@
 // 3.0.0.8
 // *fixed a crash with overlapped reads.
 // *fixed a crash with overlapped writes.
+// 3.0.0.9
+// *reconnect on ERROR_PIPE_BUSY
+// 3.0.0.10
+// *no Sleep() on ERROR_PIPE_BUSY, using WaitNamedPipe instead with a 30 second timeout.
+// 3.0.0.11
+// *cleaned up unaligned copies in _everything3_copy_len_vlq.
+// 3.0.0.12
+// *added support for multiple sessions.
 
 // dll export
 #ifdef EVERYTHING3_LIB
@@ -184,6 +193,8 @@ SIZE_T _everything3_mem_allocated = 0;
 #define _EVERYTHING3_FIND_HANDLE_CHUNK_DATA(chunk)			((BYTE *)(((_everything3_find_handle_chunk_t *)(chunk)) + 1))
 
 #define _EVERYTHING3_PROPERTY_VARIANT_ARRAY_DATA(pva)		((void *)(((_everything3_property_variant_array_t *)(pva)) + 1))
+
+#define _EVERYTHING3_CONNECT_BUSY_TIMEOUT					30000
 
 #ifdef _EVERYTHING3_DEBUG
 #include <stdio.h>
@@ -591,8 +602,8 @@ typedef struct _everything3_property_variant_s
 #pragma pack(pop)
 
 // static functions
-static void _everything3_Lock(_everything3_client_t *client);
-static void _everything3_Unlock(_everything3_client_t *client);
+static void _everything3_lock(_everything3_client_t *client);
+static void _everything3_unlock(_everything3_client_t *client);
 static SIZE_T _everything3_utf8_string_get_length_in_bytes(const EVERYTHING3_UTF8 *s);
 static void *_everything3_mem_alloc(SIZE_T size);
 static void *_everything3_mem_calloc(SIZE_T size);
@@ -601,12 +612,13 @@ static SIZE_T _everything3_safe_size_add(SIZE_T a,SIZE_T b);
 static SIZE_T _everything3_safe_size_mul_size_of_pointer(SIZE_T a);
 static SIZE_T _everything3_safe_size_mul(SIZE_T a,SIZE_T b);
 static EVERYTHING3_WCHAR *_everything3_wchar_string_cat_wchar_string_no_null_terminate(EVERYTHING3_WCHAR *out_buf,EVERYTHING3_WCHAR *current_d,const EVERYTHING3_WCHAR *s);
+static EVERYTHING3_WCHAR *_everything3_wchar_string_cat_format_dword(EVERYTHING3_WCHAR *out_buf,EVERYTHING3_WCHAR *current_d,DWORD number);
 static void _everything3_wchar_buf_init(_everything3_wchar_buf_t *wcbuf);
 static void _everything3_wchar_buf_kill(_everything3_wchar_buf_t *wcbuf);
 static void _everything3_wchar_buf_empty(_everything3_wchar_buf_t *wcbuf);
 static BOOL _everything3_wchar_buf_grow_size(_everything3_wchar_buf_t *wcbuf,SIZE_T length_in_wchars);
 static BOOL _everything3_wchar_buf_grow_length(_everything3_wchar_buf_t *wcbuf,SIZE_T length_in_wchars);
-static BOOL _everything3_wchar_buf_get_pipe_name(_everything3_wchar_buf_t *wcbuf,const EVERYTHING3_WCHAR *instance_name);
+static BOOL _everything3_wchar_buf_get_pipe_name(_everything3_wchar_buf_t *wcbuf,const EVERYTHING3_WCHAR *instance_name,BOOL allow_session);
 static BOOL _everything3_wchar_buf_copy_ansi_string(_everything3_wchar_buf_t *out_wcbuf,const EVERYTHING3_CHAR *s);
 static BOOL _everything3_wchar_buf_copy_utf8_string_n(_everything3_wchar_buf_t *out_wcbuf,const EVERYTHING3_UTF8 *s,SIZE_T slen);
 static HANDLE _everything3_create_event(void);
@@ -691,7 +703,7 @@ static EVERYTHING3_UINT64 _everything3_find_handle_chunk_read_uint64(EVERYTHING3
 static EVERYTHING3_RESULT_LIST *_everything3_search_with_extra_flags(EVERYTHING3_CLIENT *client,EVERYTHING3_SEARCH_STATE *search_state,DWORD command,DWORD extra_flags);
 static int _everything3_unicode_hex_char(int value);
 static EVERYTHING3_WCHAR *_everything3_cat_escaped_instance_name_no_null_terminate(EVERYTHING3_WCHAR *out_buf,EVERYTHING3_WCHAR *dstart,const EVERYTHING3_WCHAR *instance_name);
-static EVERYTHING3_WCHAR *_everything3_get_pipe_name(EVERYTHING3_WCHAR *out_buf,const EVERYTHING3_WCHAR *instance_name);
+static EVERYTHING3_WCHAR *_everything3_get_pipe_name(EVERYTHING3_WCHAR *out_buf,const EVERYTHING3_WCHAR *instance_name,BOOL got_session_id,DWORD session_id);
 static void _everything3_read_journal(EVERYTHING3_CLIENT *client,const _everything3_read_journal_t *read_journal,int callback_type,void *user_data,void *callback_proc);
 static void *_everything3_propvariant_alloc_string(int vt,const EVERYTHING3_UTF8 *s,SIZE_T slength_in_bytes);
 
@@ -727,6 +739,46 @@ static EVERYTHING3_WCHAR *_everything3_wchar_string_cat_wchar_string_no_null_ter
 	}
 	
 	return d;
+}
+
+// cat a formatted DWORD to a wide string.
+// call with a NULL buf to calculate the size.
+// returns required length in wide chars. (not bytes)
+static EVERYTHING3_WCHAR *_everything3_wchar_string_cat_format_dword(EVERYTHING3_WCHAR *out_buf,EVERYTHING3_WCHAR *current_d,DWORD number)
+{
+	EVERYTHING3_WCHAR num_buf[32];
+	EVERYTHING3_WCHAR *num_d;
+	DWORD i;
+	
+	num_d = num_buf + 32;
+	i = number;
+	
+	num_d--;
+	*num_d = 0;
+	
+	if (i)
+	{
+
+loop2:
+
+		num_d--;
+		*num_d = '0' + (int)(i % 10);
+		
+		i /= 10;
+		
+		if (i)
+		{
+			goto loop2;
+		}
+	}
+	else
+	{
+		// 0
+		num_d--;
+		*num_d = '0';
+	}
+
+	return _everything3_wchar_string_cat_wchar_string_no_null_terminate(out_buf,current_d,num_d);
 }
 
 // returns the hex character (0-9A-F) for the specified value (0-15).
@@ -788,7 +840,7 @@ static EVERYTHING3_WCHAR *_everything3_cat_escaped_instance_name_no_null_termina
 
 // get pipe name.
 // instance_name can be NULL.
-static EVERYTHING3_WCHAR *_everything3_get_pipe_name(EVERYTHING3_WCHAR *out_buf,const EVERYTHING3_WCHAR *instance_name)
+static EVERYTHING3_WCHAR *_everything3_get_pipe_name(EVERYTHING3_WCHAR *out_buf,const EVERYTHING3_WCHAR *instance_name,BOOL got_session_id,DWORD session_id)
 {
 	EVERYTHING3_WCHAR *d;
 	
@@ -796,6 +848,12 @@ static EVERYTHING3_WCHAR *_everything3_get_pipe_name(EVERYTHING3_WCHAR *out_buf,
 	
 	d = _everything3_wchar_string_cat_wchar_string_no_null_terminate(out_buf,d,L"\\\\.\\PIPE\\Everything IPC");
 
+	if (got_session_id)
+	{
+		d = _everything3_wchar_string_cat_wchar_string_no_null_terminate(out_buf,d,L" Session ");
+		d = _everything3_wchar_string_cat_format_dword(out_buf,d,session_id);
+	}
+	
 	if ((instance_name) && (*instance_name))
 	{
 		d = _everything3_wchar_string_cat_wchar_string_no_null_terminate(out_buf,d,L" (");
@@ -812,11 +870,25 @@ static EVERYTHING3_WCHAR *_everything3_get_pipe_name(EVERYTHING3_WCHAR *out_buf,
 }
 
 // instance_name must be non-NULL.
-static BOOL _everything3_wchar_buf_get_pipe_name(_everything3_wchar_buf_t *wcbuf,const EVERYTHING3_WCHAR *instance_name)
+static BOOL _everything3_wchar_buf_get_pipe_name(_everything3_wchar_buf_t *wcbuf,const EVERYTHING3_WCHAR *instance_name,BOOL allow_session)
 {
-	if (_everything3_wchar_buf_grow_length(wcbuf,(SIZE_T)_everything3_get_pipe_name(NULL,instance_name)))
+	BOOL got_session_id;
+	DWORD session_id;
+	
+	got_session_id = FALSE;
+	session_id = 0;
+	
+	if (allow_session)
 	{
-		_everything3_get_pipe_name(wcbuf->buf,instance_name);
+		if (ProcessIdToSessionId(GetCurrentProcessId(),&session_id))
+		{
+			got_session_id = TRUE;
+		}
+	}
+	
+	if (_everything3_wchar_buf_grow_length(wcbuf,(SIZE_T)_everything3_get_pipe_name(NULL,instance_name,got_session_id,session_id)))
+	{
+		_everything3_get_pipe_name(wcbuf->buf,instance_name,got_session_id,session_id);
 		
 		return TRUE;
 	}
@@ -876,15 +948,22 @@ EVERYTHING3_USERAPI _everything3_client_t *EVERYTHING3_API Everything3_ConnectW(
 {
 	_everything3_client_t *ret;
 	_everything3_wchar_buf_t pipe_name_wcbuf;
+	BOOL did_session_name;
 
 	ret = NULL;
 	_everything3_wchar_buf_init(&pipe_name_wcbuf);
+	did_session_name = FALSE;
 
-	if (_everything3_wchar_buf_get_pipe_name(&pipe_name_wcbuf,instance_name))
+	if (_everything3_wchar_buf_get_pipe_name(&pipe_name_wcbuf,instance_name,TRUE))
 	{
 		HANDLE pipe_handle;
+		DWORD tick_start;
+		
+		tick_start = GetTickCount();
 
 retry:
+		
+		_everything3_debug_printf("CreateFile %S...\n",pipe_name_wcbuf.buf);
 		
 		pipe_handle = CreateFileW(pipe_name_wcbuf.buf,GENERIC_READ|GENERIC_WRITE,0,0,OPEN_EXISTING,FILE_FLAG_OVERLAPPED,0);
 		if (pipe_handle != INVALID_HANDLE_VALUE)
@@ -953,14 +1032,44 @@ retry:
 			
 			_everything3_debug_printf("CreateFile %S failed %u\n",pipe_name_wcbuf.buf,last_error);
 			
+			if (last_error == ERROR_FILE_NOT_FOUND)
+			{
+				if (!did_session_name)
+				{
+					// try the pipe name without the session
+					// if our session doesn't match, the server will boot us.
+					if (_everything3_wchar_buf_get_pipe_name(&pipe_name_wcbuf,instance_name,FALSE))
+					{
+						did_session_name = TRUE;
+						
+						goto retry;
+					}
+				}
+			}
+			else
 			if (last_error == ERROR_PIPE_BUSY)
 			{
-				Sleep(10);
+				DWORD elapsed;
 				
-				// Everything will create a new pipe server immediately.
-				// this will not take very long.
-				// retry
-				goto retry;
+				elapsed = GetTickCount() - tick_start;
+				
+				// don't sleep here.
+				// we want to retry asap, so use WaitNamedPipe.
+				// the server will recreate the pipe server immediately, so this shouldn't take longer than 1ms.
+				// we use a large timeout here to catch any worse case scenarios.
+				if (elapsed < _EVERYTHING3_CONNECT_BUSY_TIMEOUT)
+				{
+					DWORD wait_last_error;
+					
+					if (WaitNamedPipe(pipe_name_wcbuf.buf,_EVERYTHING3_CONNECT_BUSY_TIMEOUT - elapsed))
+					{
+						goto retry;
+					}
+
+					wait_last_error = GetLastError();
+					
+					_everything3_debug_printf("Connect pipe %S WaitNamedPipe failed %u\n",pipe_name_wcbuf.buf,wait_last_error);
+				}
 			}
 		
 			SetLastError(EVERYTHING3_ERROR_IPC_PIPE_NOT_FOUND);
@@ -1279,11 +1388,11 @@ static SIZE_T _everything3_safe_size_mul_size_of_pointer(SIZE_T a)
 	c = _everything3_safe_size_add(a,a); // x2
 	c = _everything3_safe_size_add(c,c); // x4
 
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
+#if SIZE_MAX == EVERYTHING3_UINT64_MAX
 
 	c = _everything3_safe_size_add(c,c); // x8
 
-#elif SIZE_MAX == 0xFFFFFFFF
+#elif SIZE_MAX == EVERYTHING3_DWORD_MAX
 
 #else
 
@@ -1314,13 +1423,13 @@ static SIZE_T _everything3_safe_size_mul(SIZE_T a,SIZE_T b)
 
 // lock the client
 // this will prevent reentry calls from other threads.
-static void _everything3_Lock(_everything3_client_t *client)
+static void _everything3_lock(_everything3_client_t *client)
 {
 	EnterCriticalSection(&client->cs);
 }
 
 // unlock the client
-static void _everything3_Unlock(_everything3_client_t *client)
+static void _everything3_unlock(_everything3_client_t *client)
 {
 	LeaveCriticalSection(&client->cs);
 }
@@ -1832,7 +1941,7 @@ static BOOL _everything3_ioctrl(_everything3_client_t *client,DWORD code,const v
 
 	if (client)
 	{
-		_everything3_Lock(client);
+		_everything3_lock(client);
 		
 		if (_everything3_send(client,code,in_data,in_size))
 		{
@@ -1863,7 +1972,7 @@ static BOOL _everything3_ioctrl(_everything3_client_t *client,DWORD code,const v
 			}
 		}		
 		
-		_everything3_Unlock(client);
+		_everything3_unlock(client);
 	}
 	else
 	{
@@ -1907,7 +2016,7 @@ static BOOL _everything3_ioctrl_get_string(_everything3_client_t *client,DWORD c
 
 	if (client)
 	{
-		_everything3_Lock(client);
+		_everything3_lock(client);
 		
 		if (_everything3_send(client,code,in_data,in_size))
 		{
@@ -1936,7 +2045,7 @@ static BOOL _everything3_ioctrl_get_string(_everything3_client_t *client,DWORD c
 			}
 		}		
 		
-		_everything3_Unlock(client);
+		_everything3_unlock(client);
 	}
 	else
 	{
@@ -2169,11 +2278,11 @@ EVERYTHING3_USERAPI EVERYTHING3_SEARCH_STATE *EVERYTHING3_API Everything3_Create
 		
 		search_state->viewport_count = SIZE_MAX;
 					
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
+#if SIZE_MAX == EVERYTHING3_UINT64_MAX
 
 		search_state->search_flags |= _EVERYTHING3_SEARCH_FLAG_64BIT;
 
-#elif SIZE_MAX == 0xFFFFFFFF
+#elif SIZE_MAX == EVERYTHING3_DWORD_MAX
 
 #else
 
@@ -2861,7 +2970,7 @@ static BOOL _everything3_add_search_property_request(EVERYTHING3_SEARCH_STATE *s
 
 // Specify which properties to gather.
 // the default is no property requests.
-// Everything will fall back to EVERYTHING3_PROPERTY_ID_PATH_AND_NAME property if no properties are specified.
+// Everything will fall back to EVERYTHING3_PROPERTY_ID_FULL_PATH property if no properties are specified.
 // There's no limit on the number of properties you can add.
 // A search that requests indexed properties will return immediately.
 // A search that requests properties that have not been indexed will be gathered before the search returns.
@@ -2883,7 +2992,7 @@ EVERYTHING3_USERAPI BOOL EVERYTHING3_API Everything3_AddSearchPropertyRequestHig
 }
 
 // Clear all property requests.
-// Everything will fall back to EVERYTHING3_PROPERTY_ID_PATH_AND_NAME property if no properties are specified.
+// Everything will fall back to EVERYTHING3_PROPERTY_ID_FULL_PATH property if no properties are specified.
 // Properties can be requested with Everything3_AddSearchPropertyRequest.
 EVERYTHING3_USERAPI BOOL EVERYTHING3_API Everything3_ClearSearchPropertyRequests(EVERYTHING3_SEARCH_STATE *search_state)
 {
@@ -3157,7 +3266,7 @@ static EVERYTHING3_RESULT_LIST *_everything3_search_with_extra_flags(EVERYTHING3
 		BYTE *packet_data;
 		SIZE_T packet_size;
 		
-		_everything3_Lock(client);
+		_everything3_lock(client);
 		
 		EnterCriticalSection(&search_state->cs);
 		
@@ -4068,7 +4177,7 @@ got_error:
 		
 		LeaveCriticalSection(&search_state->cs);
 	
-		_everything3_Unlock(client);
+		_everything3_unlock(client);
 	}
 	else
 	{
@@ -5216,11 +5325,11 @@ static SIZE_T _everything3_stream_read_size_t(_everything3_stream_t *stream)
 		
 		uint64_value = _everything3_stream_read_uint64(stream);	
 					
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
+#if SIZE_MAX == EVERYTHING3_UINT64_MAX
 
 		ret = uint64_value;
 
-#elif SIZE_MAX == 0xFFFFFFFF
+#elif SIZE_MAX == EVERYTHING3_DWORD_MAX
 
 		if (uint64_value <= SIZE_MAX)
 		{
@@ -5291,7 +5400,7 @@ static SIZE_T _everything3_stream_read_len_vlq(_everything3_stream_t *stream)
 		return _everything3_safe_size_add(start,dword_value);
 	}
 
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
+#if SIZE_MAX == EVERYTHING3_UINT64_MAX
 
 	{
 		EVERYTHING3_UINT64 uint64_value;
@@ -5301,7 +5410,7 @@ static SIZE_T _everything3_stream_read_len_vlq(_everything3_stream_t *stream)
 
 		uint64_value = _everything3_stream_read_uint64(stream);
 
-		if (uint64_value < 0xFFFFFFFFFFFFFFFFUI64)
+		if (uint64_value < EVERYTHING3_UINT64_MAX)
 		{
 			return _everything3_safe_size_add(start,uint64_value);
 		}
@@ -5310,7 +5419,7 @@ static SIZE_T _everything3_stream_read_len_vlq(_everything3_stream_t *stream)
 		return EVERYTHING3_UINT64_MAX;
 	}
 	
-#elif SIZE_MAX == 0xffffffffui32
+#elif SIZE_MAX == EVERYTHING3_DWORD_MAX
 		
 	stream->error_code = EVERYTHING3_ERROR_OUT_OF_MEMORY;
 	return EVERYTHING3_DWORD_MAX;
@@ -5353,6 +5462,7 @@ void _everything3_stream_read_utf8_string(_everything3_stream_t *stream,_everyth
 
 
 // fill in a buffer with a VLQ value and progress the buffer pointer.
+// out_buf is unaligned.
 static BYTE *_everything3_copy_len_vlq(BYTE *out_buf,SIZE_T value)
 {
 	BYTE *d;
@@ -5388,10 +5498,13 @@ static BYTE *_everything3_copy_len_vlq(BYTE *out_buf,SIZE_T value)
 	{
 		if (out_buf)
 		{
-			*(WORD *)d = (WORD)value;
+			*d++ = (BYTE)(value);
+			*d++ = (BYTE)(value >> 8);
 		}
-
-		d += 2;
+		else
+		{
+			d += 2;
+		}
 		
 		return d;
 	}
@@ -5400,19 +5513,27 @@ static BYTE *_everything3_copy_len_vlq(BYTE *out_buf,SIZE_T value)
 
 	if (out_buf)
 	{
-		*(WORD *)d = 0xffff;
+		*d++ = 0xff;
+		*d++ = 0xff;
 	}
-
-	d += 2;
+	else
+	{
+		d += 2;
+	}
 	
 	if (value < 0xffffffff)
 	{
 		if (out_buf)
 		{
-			*(DWORD *)d = (DWORD)value;
+			*d++ = (BYTE)(value);
+			*d++ = (BYTE)(value >> 8);
+			*d++ = (BYTE)(value >> 16);
+			*d++ = (BYTE)(value >> 24);
 		}
-
-		d += 4;
+		else
+		{
+			d += 4;
+		}
 		
 		return d;
 	}
@@ -5421,30 +5542,36 @@ static BYTE *_everything3_copy_len_vlq(BYTE *out_buf,SIZE_T value)
 
 	if (out_buf)
 	{
-		*(DWORD *)d = 0xffffffff;
+		*d++ = 0xff;
+		*d++ = 0xff;
+		*d++ = 0xff;
+		*d++ = 0xff;
 	}
-
-	d += 4;
+	else
+	{
+		d += 4;
+	}
+	
+	if (out_buf)
+	{
+		*d++ = (BYTE)(value);
+		*d++ = (BYTE)(value >> 8);
+		*d++ = (BYTE)(value >> 16);
+		*d++ = (BYTE)(value >> 24);
+		*d++ = (BYTE)(value >> 32);
+		*d++ = (BYTE)(value >> 40);
+		*d++ = (BYTE)(value >> 48);
+		*d++ = (BYTE)(value >> 56);
+	}
+	else
+	{
+		d += 8;
+	}
 	
 	// value cannot be larger than or equal to 0xffffffffffffffff
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
+#if SIZE_MAX == EVERYTHING3_UINT64_MAX
 
-	if (out_buf)
-	{
-		*(EVERYTHING3_UINT64 *)d = (EVERYTHING3_UINT64)value;
-	}
-
-	d += 8;
-	
-
-#elif SIZE_MAX == 0xFFFFFFFF
-
-	if (out_buf)
-	{
-		*(EVERYTHING3_UINT64 *)d = (EVERYTHING3_UINT64)value;
-	}
-
-	d += 8;
+#elif SIZE_MAX == EVERYTHING3_DWORD_MAX
 	
 #else
 	#error unknown SIZE_MAX
@@ -5465,11 +5592,11 @@ static BYTE *_everything3_copy_uint64(BYTE *out_buf,EVERYTHING3_UINT64 value)
 
 static BYTE *_everything3_copy_size_t(BYTE *out_buf,SIZE_T value)
 {
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
+#if SIZE_MAX == EVERYTHING3_UINT64_MAX
 	
 	return _everything3_copy_uint64(out_buf,(EVERYTHING3_UINT64)value);
 	
-#elif SIZE_MAX == 0xFFFFFFFF
+#elif SIZE_MAX == EVERYTHING3_DWORD_MAX
 
 	return _everything3_copy_dword(out_buf,(DWORD)value);
 	
@@ -6212,11 +6339,11 @@ EVERYTHING3_USERAPI SIZE_T EVERYTHING3_API Everything3_GetResultPropertySIZE_T(c
 						// memory is unaligned.
 						_everything3_copy_memory(&uint64_value,property_p,sizeof(EVERYTHING3_UINT64));
 						
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
+#if SIZE_MAX == EVERYTHING3_UINT64_MAX
 
 						ret = uint64_value;
 
-#elif SIZE_MAX == 0xFFFFFFFF
+#elif SIZE_MAX == EVERYTHING3_DWORD_MAX
 
 						if (uint64_value <= SIZE_MAX)
 						{
@@ -6481,17 +6608,17 @@ EVERYTHING3_USERAPI EVERYTHING3_SIZE_T EVERYTHING3_API Everything3_GetResultPath
 
 EVERYTHING3_USERAPI EVERYTHING3_SIZE_T EVERYTHING3_API Everything3_GetResultFullPathNameUTF8(const EVERYTHING3_RESULT_LIST *result_list,EVERYTHING3_SIZE_T result_index,EVERYTHING3_UTF8 *out_buf,EVERYTHING3_SIZE_T bufsize)
 {
-	return Everything3_GetResultPropertyTextUTF8(result_list,result_index,EVERYTHING3_PROPERTY_ID_PATH_AND_NAME,out_buf,bufsize);
+	return Everything3_GetResultPropertyTextUTF8(result_list,result_index,EVERYTHING3_PROPERTY_ID_FULL_PATH,out_buf,bufsize);
 }
 
 EVERYTHING3_USERAPI EVERYTHING3_SIZE_T EVERYTHING3_API Everything3_GetResultFullPathNameW(const EVERYTHING3_RESULT_LIST *result_list,EVERYTHING3_SIZE_T result_index,EVERYTHING3_WCHAR *out_wbuf,EVERYTHING3_SIZE_T wbuf_size_in_wchars)
 {
-	return Everything3_GetResultPropertyTextW(result_list,result_index,EVERYTHING3_PROPERTY_ID_PATH_AND_NAME,out_wbuf,wbuf_size_in_wchars);
+	return Everything3_GetResultPropertyTextW(result_list,result_index,EVERYTHING3_PROPERTY_ID_FULL_PATH,out_wbuf,wbuf_size_in_wchars);
 }
 
 EVERYTHING3_USERAPI EVERYTHING3_SIZE_T EVERYTHING3_API Everything3_GetResultFullPathNameA(const EVERYTHING3_RESULT_LIST *result_list,EVERYTHING3_SIZE_T result_index,EVERYTHING3_CHAR *out_buf,EVERYTHING3_SIZE_T bufsize)
 {
-	return Everything3_GetResultPropertyTextA(result_list,result_index,EVERYTHING3_PROPERTY_ID_PATH_AND_NAME,out_buf,bufsize);
+	return Everything3_GetResultPropertyTextA(result_list,result_index,EVERYTHING3_PROPERTY_ID_FULL_PATH,out_buf,bufsize);
 }
 
 EVERYTHING3_USERAPI EVERYTHING3_UINT64 EVERYTHING3_API Everything3_GetResultSize(const EVERYTHING3_RESULT_LIST *result_list,SIZE_T result_index)
@@ -6566,17 +6693,17 @@ EVERYTHING3_USERAPI EVERYTHING3_UINT64 EVERYTHING3_API Everything3_GetResultDate
 
 EVERYTHING3_USERAPI EVERYTHING3_SIZE_T EVERYTHING3_API Everything3_GetResultFilelistFilenameUTF8(const EVERYTHING3_RESULT_LIST *result_list,EVERYTHING3_SIZE_T result_index,EVERYTHING3_UTF8 *out_buf,EVERYTHING3_SIZE_T bufsize)
 {
-	return Everything3_GetResultPropertyTextUTF8(result_list,result_index,EVERYTHING3_PROPERTY_ID_FILE_LIST_PATH_AND_NAME,out_buf,bufsize);
+	return Everything3_GetResultPropertyTextUTF8(result_list,result_index,EVERYTHING3_PROPERTY_ID_FILE_LIST_FULL_PATH,out_buf,bufsize);
 }
 
 EVERYTHING3_USERAPI EVERYTHING3_SIZE_T EVERYTHING3_API Everything3_GetResultFilelistFilenameW(const EVERYTHING3_RESULT_LIST *result_list,EVERYTHING3_SIZE_T result_index,EVERYTHING3_WCHAR *out_wbuf,EVERYTHING3_SIZE_T wbuf_size_in_wchars)
 {
-	return Everything3_GetResultPropertyTextW(result_list,result_index,EVERYTHING3_PROPERTY_ID_FILE_LIST_PATH_AND_NAME,out_wbuf,wbuf_size_in_wchars);
+	return Everything3_GetResultPropertyTextW(result_list,result_index,EVERYTHING3_PROPERTY_ID_FILE_LIST_FULL_PATH,out_wbuf,wbuf_size_in_wchars);
 }
 
 EVERYTHING3_USERAPI EVERYTHING3_SIZE_T EVERYTHING3_API Everything3_GetResultFilelistFilenameA(const EVERYTHING3_RESULT_LIST *result_list,EVERYTHING3_SIZE_T result_index,EVERYTHING3_CHAR *out_buf,EVERYTHING3_SIZE_T bufsize)
 {
-	return Everything3_GetResultPropertyTextA(result_list,result_index,EVERYTHING3_PROPERTY_ID_FILE_LIST_PATH_AND_NAME,out_buf,bufsize);
+	return Everything3_GetResultPropertyTextA(result_list,result_index,EVERYTHING3_PROPERTY_ID_FILE_LIST_FULL_PATH,out_buf,bufsize);
 }
 
 static DWORD _everything3_get_run_count(EVERYTHING3_CLIENT *client,const EVERYTHING3_UTF8 *filename,SIZE_T filename_length_in_bytes)
@@ -7130,7 +7257,7 @@ static EVERYTHING3_FIND_HANDLE *_everything3_find_first_file(EVERYTHING3_CLIENT 
 		chunk_start = NULL;
 		chunk_last = NULL;
 		
-		_everything3_Lock(client);
+		_everything3_lock(client);
 		
 		if (_everything3_send(client,_EVERYTHING3_COMMAND_GET_FIND_FIRST_FILE,filename,filename_length_in_bytes))
 		{
@@ -7230,7 +7357,7 @@ static EVERYTHING3_FIND_HANDLE *_everything3_find_first_file(EVERYTHING3_CLIENT 
 			}
 		}
 		
-		_everything3_Unlock(client);
+		_everything3_unlock(client);
 	}
 	else
 	{
@@ -7454,7 +7581,7 @@ static SIZE_T _everything3_find_handle_chunk_read_len_vlq(EVERYTHING3_FIND_HANDL
 		return _everything3_safe_size_add(start,dword_value);
 	}
 
-#if SIZE_MAX == 0xFFFFFFFFFFFFFFFFUI64
+#if SIZE_MAX == EVERYTHING3_UINT64_MAX
 
 	{
 		EVERYTHING3_UINT64 uint64_value;
@@ -7464,7 +7591,7 @@ static SIZE_T _everything3_find_handle_chunk_read_len_vlq(EVERYTHING3_FIND_HANDL
 
 		uint64_value =_everything3_find_handle_chunk_read_uint64(find_handle);
 
-		if (uint64_value < 0xFFFFFFFFFFFFFFFFUI64)
+		if (uint64_value < EVERYTHING3_UINT64_MAX)
 		{
 			return _everything3_safe_size_add(start,uint64_value);
 		}
@@ -7473,7 +7600,7 @@ static SIZE_T _everything3_find_handle_chunk_read_len_vlq(EVERYTHING3_FIND_HANDL
 		return EVERYTHING3_UINT64_MAX;
 	}
 	
-#elif SIZE_MAX == 0xffffffffui32
+#elif SIZE_MAX == EVERYTHING3_DWORD_MAX
 		
 	find_handle->error_code = EVERYTHING3_ERROR_OUT_OF_MEMORY;
 	return EVERYTHING3_DWORD_MAX;
@@ -8485,7 +8612,7 @@ static void _everything3_read_journal(EVERYTHING3_CLIENT *client,const _everythi
 {
 	if (client)
 	{
-		_everything3_Lock(client);
+		_everything3_lock(client);
 		
 		if (_everything3_send(client,_EVERYTHING3_COMMAND_READ_JOURNAL,read_journal,sizeof(_everything3_read_journal_t)))
 		{
@@ -8857,7 +8984,7 @@ static void _everything3_read_journal(EVERYTHING3_CLIENT *client,const _everythi
 			_everything3_stream_kill(&stream);
 		}		
 		
-		_everything3_Unlock(client);
+		_everything3_unlock(client);
 	}
 	else
 	{
