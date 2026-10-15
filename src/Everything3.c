@@ -78,7 +78,7 @@
 // *no Sleep() on ERROR_PIPE_BUSY, using WaitNamedPipe instead with a 30 second timeout.
 // 3.0.0.11
 // *cleaned up unaligned copies in _everything3_copy_len_vlq.
-// 3.0.0.12
+// 3.0.1.12
 // *added support for multiple sessions.
 
 // dll export
