@@ -20,10 +20,10 @@ Previous versions are compatible with Everything 1.5.
 <br/><br/>
 The Everything 1.5 SDK now uses named pipes.
 <br/><br/>
-The name of the pipe is:
+The name of the pipe is:<br/>
 <code>\\\\.\PIPE\Everything IPC Session &lt;session-id&gt;</code><br/>
 Where &lt;session-id&gt; is the session ID.
-If Everything is running in an instance, the pipe name is: 
+If Everything is running in an instance, the pipe name is:<br/>
 <code>\\\\.\PIPE\Everything IPC Session &lt;session-id&gt; (&lt;instance-name&gt;)</code><br/>
 Where &lt;instance-name&gt; is the instance name.
 Everything 1.5 alpha runs in a <code>1.5a</code> instance.<br/>
