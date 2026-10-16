@@ -1,5 +1,6 @@
-Friday 16 October 2026: Version 3.0.1.10
+Friday 16 October 2026: Version 3.0.1.12
 	added support for multiple sessions.
+	improved waiting on busy pipes.
 
 Saturday 11 October 2025: Version 3.0.0.9
 	improved connecting to the ipc3 pipe server when it is busy.
